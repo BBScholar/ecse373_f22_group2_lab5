@@ -61,17 +61,20 @@ geometry_msgs::TransformStamped
 get_robot_to_frame(const std::string &to_frame) {
   geometry_msgs::TransformStamped tf;
   try {
-    tf = g_tf_buf.lookupTransform("arm1_base_frame", to_frame, ros::Time(0),
-                                  ros::Duration(1.0));
+    tf = g_tf_buf.lookupTransform("arm1_vacuum_gripper_link", to_frame,
+                                  ros::Time(0.0), ros::Duration(1.0));
   } catch (tf2::TransformException &ex) {
     ROS_ERROR("%s", ex.what());
   }
   return tf;
 }
 
-void process_order(osrf_gear::Order &order) {
+// TODO: figure out where to calls this
+void process_order(const osrf_gear::Order &order) {
   osrf_gear::GetMaterialLocations get_loc;
+  // loop over all shipments in order
   for (const auto &s : order.shipments) {
+    // loop over every product in order
     for (const auto &p : s.products) {
       get_loc.request.material_type = p.type;
       const bool send = g_material_location_client.call(get_loc);
@@ -81,7 +84,33 @@ void process_order(osrf_gear::Order &order) {
       }
 
       for (const osrf_gear::StorageUnit &su : get_loc.response.storage_units) {
-        ROS_INFO("Product %s is in %s", p.type, su.unit_id);
+        ROS_INFO("Product %s is in %s", p.type.c_str(), su.unit_id.c_str());
+        if (su.unit_id == "belt") {
+
+        } else {
+          const char c = su.unit_id[3];
+          const int bin_num = (int(c) - int('0')) - 1;
+          const LogicalCameraImage &img = g_bin_images[bin_num];
+
+          const std::string camera_frame =
+              "logical_camera_" + su.unit_id + "_frame";
+          ROS_INFO("Getting transform to frame: %s", camera_frame.c_str());
+          const auto tf = get_robot_to_frame(camera_frame);
+
+          geometry_msgs::PoseStamped part_pose, goal_pose, camera_pose;
+
+          camera_pose.pose = img.pose;
+          part_pose.pose = img.models[0].pose;
+
+          tf2::doTransform(part_pose, goal_pose, tf);
+
+          adjust_pose(goal_pose);
+
+          geometry_msgs::Point pos = goal_pose.pose.position;
+
+          ROS_WARN_ONCE("Position of %s: (%f, %f, %f)", p.type.c_str(), pos.x,
+                        pos.y, pos.z);
+        }
       }
     }
   }
@@ -135,7 +164,7 @@ int main(int argc, char **argv) {
   std::array<ros::Subscriber, 2> agv_camera_subs;
   std::array<ros::Subscriber, 2> quality_camera_subs;
 
-  ROS_INFO("Subsribing to bin cameras");
+  ROS_INFO("Subscribing to bin cameras");
   // generate subsribers to bin camera
   for (int i = 1; i <= 6; ++i) {
     const std::string topic = "/ariac/logical_camera_bin" + std::to_string(i);
@@ -177,7 +206,15 @@ int main(int argc, char **argv) {
 
   ros::Rate r(10);
 
-  ros::spin();
+  while (ros::ok()) {
+    if (g_orders.size() > 0) {
+      const auto order = g_orders.front();
+      process_order(order);
+      g_orders.pop();
+    }
+    ros::spinOnce();
+    r.sleep();
+  }
 
   return 0;
 }
