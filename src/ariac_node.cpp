@@ -51,6 +51,7 @@ tf2_ros::Buffer g_tf_buf;
 
 // global data
 std::queue<osrf_gear::Order> g_orders;
+std::queue<geometry_msgs::Pose> g_transform_queue;
 sensor_msgs::JointState g_joint_state;
 
 LogicalCameraArray<6> g_bin_images;
@@ -65,6 +66,15 @@ bool close_to(double *a, double *b, int n) {
     eq &= (diff < threshold);
   }
   return eq;
+}
+
+bool stopped() {
+  const double threshold = 0.01;
+  bool stopped = true;
+  for (const auto v : g_joint_state.velocity) {
+    stopped &= std::abs(v) < threshold;
+  }
+  return stopped;
 }
 
 void adjust_pose(geometry_msgs::PoseStamped &pose) {
@@ -127,6 +137,9 @@ void process_order(const osrf_gear::Order &order) {
 
           geometry_msgs::Point pos = goal_pose.pose.position;
 
+          ROS_INFO("Adding transform to queue");
+          g_transform_queue.push(goal_pose.pose);
+
           ROS_WARN_ONCE("Position of %s: (%f, %f, %f)", p.type.c_str(), pos.x,
                         pos.y, pos.z);
         }
@@ -184,6 +197,7 @@ int main(int argc, char **argv) {
   auto order_sub = nh.subscribe("/ariac/orders", 2, order_callback);
   auto joint_state_sub =
       nh.subscribe("/ariac/arm1/joint_states", 128, joint_state_callback);
+
   auto traj_pub =
       nh.advertise<trajectory_msgs::JointTrajectory>("/ariac/arm1/command", 2);
 
@@ -236,25 +250,37 @@ int main(int argc, char **argv) {
   double T_current[4][4], T_des[4][4];
 
   int traj_count = 0;
+  bool first = true;
+
+  ROS_INFO("Before loop");
 
   ros::Rate r(10);
   while (ros::ok()) {
     if (g_orders.size() > 0) {
+      ROS_INFO("Getting order");
       const auto order = g_orders.front();
       process_order(order);
       g_orders.pop();
     }
 
+    ROS_INFO("Setting current joint states");
+    std::cout.flush();
     for (int i = 0; i < 6; ++i) {
       q_pose[i] = g_joint_state.position[i + 1];
     }
 
-    ur_kinematics::forward(q_pose, &T_current[0][0]);
+    ur_kinematics::forward((double *)&q_pose, (double *)&T_current);
 
-    if (close_to(&T_current[0][0], &T_des[0][0], 16)) {
-      T_des[0][3] = desired.pose.position.x;
-      T_des[1][3] = desired.pose.position.y;
-      T_des[2][3] = desired.pose.position.z + 0.3; // above part
+    if ((first && g_transform_queue.size() > 0) ||
+        (stopped() && close_to(&T_current[0][0], &T_des[0][0], 16) &&
+         g_transform_queue.size() > 0)) {
+      first = false;
+      const geometry_msgs::Pose desired = g_transform_queue.front();
+      g_transform_queue.pop();
+
+      T_des[0][3] = desired.position.x;
+      T_des[1][3] = desired.position.y;
+      T_des[2][3] = desired.position.z + 0.3; // above part
       T_des[3][3] = 1.0;
       // The orientation of the end effector so that the end effector is down.
       T_des[0][0] = 0.0;
@@ -271,6 +297,7 @@ int main(int argc, char **argv) {
       T_des[3][2] = 0.0;
 
       int num_sols = ur_kinematics::inverse((double *)&T_des, (double *)&q_des);
+
       trajectory_msgs::JointTrajectory joint_trajectory;
 
       joint_trajectory.header.seq = traj_count++;
@@ -290,12 +317,37 @@ int main(int argc, char **argv) {
 
       joint_trajectory.points.resize(2);
 
+      joint_trajectory.points[0].positions.resize(
+          joint_trajectory.joint_names.size());
       joint_trajectory.points[1].positions.resize(
           joint_trajectory.joint_names.size());
+
       joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
       joint_trajectory.points[1].time_from_start = ros::Duration(1.0);
 
-      traj_pub.publish(&joint_trajectory);
+      for (int indy = 0; indy < joint_trajectory.joint_names.size(); indy++) {
+        for (int indz = 0; indz < g_joint_state.name.size(); indz++) {
+          if (joint_trajectory.joint_names[indy] == g_joint_state.name[indz]) {
+            joint_trajectory.points[0].positions[indy] =
+                g_joint_state.position[indz];
+            break;
+          }
+        }
+      }
+
+      int q_des_indx = 0;
+      // Set the end point for the movement
+      // Set the linear_arm_actuator_joint from joint_states as it is not part
+      // of the inverse
+      joint_trajectory.points[1].positions[0] = g_joint_state.position[1];
+      // The actuators are commanded in an odd order, enter the joint positions
+      // in the correct
+      for (int indy = 0; indy < 6; indy++) {
+        joint_trajectory.points[1].positions[indy + 1] =
+            q_des[q_des_indx][indy];
+      }
+
+      traj_pub.publish(joint_trajectory);
     }
 
     ros::spinOnce();
