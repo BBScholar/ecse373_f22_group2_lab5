@@ -70,11 +70,11 @@ bool close_to(double *a, double *b, int n) {
 
 bool stopped() {
   const double threshold = 0.01;
-  bool stopped = true;
+  bool s = true;
   for (const auto v : g_joint_state.velocity) {
-    stopped &= std::abs(v) < threshold;
+    s &= std::abs(v) < threshold;
   }
-  return stopped;
+  return s;
 }
 
 void adjust_pose(geometry_msgs::PoseStamped &pose) {
@@ -126,22 +126,25 @@ void process_order(const osrf_gear::Order &order) {
           ROS_INFO("Getting transform to frame: %s", camera_frame.c_str());
           const auto tf = get_robot_to_frame(camera_frame);
 
+          // for(const )
+
           geometry_msgs::PoseStamped part_pose, goal_pose, camera_pose;
 
           camera_pose.pose = img.pose;
-          part_pose.pose = img.models[0].pose;
+          // part_pose.pose = img.models[0].pose;
 
-          tf2::doTransform(part_pose, goal_pose, tf);
+          for (const auto &model : img.models) {
+            part_pose.pose = model.pose;
+            tf2::doTransform(part_pose, goal_pose, tf);
+            adjust_pose(goal_pose);
+            geometry_msgs::Point pos = goal_pose.pose.position;
 
-          adjust_pose(goal_pose);
+            ROS_INFO("Adding transform to queue");
+            g_transform_queue.push(goal_pose.pose);
 
-          geometry_msgs::Point pos = goal_pose.pose.position;
-
-          ROS_INFO("Adding transform to queue");
-          g_transform_queue.push(goal_pose.pose);
-
-          ROS_WARN_ONCE("Position of %s: (%f, %f, %f)", p.type.c_str(), pos.x,
-                        pos.y, pos.z);
+            ROS_WARN_ONCE("Position of %s: (%f, %f, %f)", p.type.c_str(), pos.x,
+                          pos.y, pos.z);
+          }
         }
       }
     }
@@ -198,8 +201,8 @@ int main(int argc, char **argv) {
   auto joint_state_sub =
       nh.subscribe("/ariac/arm1/joint_states", 128, joint_state_callback);
 
-  auto traj_pub =
-      nh.advertise<trajectory_msgs::JointTrajectory>("/ariac/arm1/command", 2);
+  auto traj_pub = nh.advertise<trajectory_msgs::JointTrajectory>(
+      "/ariac/arm1/arm/command", 2);
 
   // arrays of subsribers
   std::array<ros::Subscriber, 6> bin_camera_subs;
@@ -254,6 +257,19 @@ int main(int argc, char **argv) {
 
   ROS_INFO("Before loop");
 
+  ros::spinOnce();
+
+  geometry_msgs::Pose start_pose;
+  // start_pose.position.x = -0.25;
+  // start_pose.position.y = 0.53;
+  // start_pose.position.z = 0.72;
+
+  start_pose.position.x = 0.62;
+  start_pose.position.y = -0.06;
+  start_pose.position.z = 1.54 + 0.5;
+
+  g_transform_queue.push(start_pose);
+
   ros::Rate r(10);
   while (ros::ok()) {
     if (g_orders.size() > 0) {
@@ -263,91 +279,111 @@ int main(int argc, char **argv) {
       g_orders.pop();
     }
 
-    ROS_INFO("Setting current joint states");
+    ROS_INFO_THROTTLE(10, "Setting current joint states");
     std::cout.flush();
-    for (int i = 0; i < 6; ++i) {
-      q_pose[i] = g_joint_state.position[i + 1];
-    }
 
-    ur_kinematics::forward((double *)&q_pose, (double *)&T_current);
+    if (g_joint_state.position.size() >= 7) {
+      for (int i = 0; i < 6; ++i) {
+        q_pose[i] = g_joint_state.position[i + 1];
+      }
 
-    if ((first && g_transform_queue.size() > 0) ||
-        (stopped() && close_to(&T_current[0][0], &T_des[0][0], 16) &&
-         g_transform_queue.size() > 0)) {
-      first = false;
-      const geometry_msgs::Pose desired = g_transform_queue.front();
-      g_transform_queue.pop();
+      ur_kinematics::forward((double *)&q_pose, (double *)&T_current);
+      ROS_INFO_THROTTLE(5, "Current position: %0f %0f %0f", T_current[0][3],
+                        T_current[1][3], T_current[2][3]);
 
-      T_des[0][3] = desired.position.x;
-      T_des[1][3] = desired.position.y;
-      T_des[2][3] = desired.position.z + 0.3; // above part
-      T_des[3][3] = 1.0;
-      // The orientation of the end effector so that the end effector is down.
-      T_des[0][0] = 0.0;
-      T_des[0][1] = -1.0;
-      T_des[0][2] = 0.0;
-      T_des[1][0] = 0.0;
-      T_des[1][1] = 0.0;
-      T_des[1][2] = 1.0;
-      T_des[2][0] = -1.0;
-      T_des[2][1] = 0.0;
-      T_des[2][2] = 0.0;
-      T_des[3][0] = 0.0;
-      T_des[3][1] = 0.0;
-      T_des[3][2] = 0.0;
+      if (g_transform_queue.size() < 1) {
+        ROS_INFO("No transforms in queue");
+      }
 
-      int num_sols = ur_kinematics::inverse((double *)&T_des, (double *)&q_des);
+      if ((first && g_transform_queue.size() > 0) ||
+          (stopped() && close_to(&T_current[0][0], &T_des[0][0], 16) &&
+           g_transform_queue.size() > 0)) {
+        first = false;
+        ROS_INFO("Getting new transform...");
+        const geometry_msgs::Pose desired = g_transform_queue.front();
+        g_transform_queue.pop();
 
-      trajectory_msgs::JointTrajectory joint_trajectory;
+        ROS_INFO("Going to position: %0f %0f %0f", desired.position.x,
+                 desired.position.y, desired.position.z);
 
-      joint_trajectory.header.seq = traj_count++;
-      joint_trajectory.header.stamp =
-          ros::Time::now(); // When was this message created.
-      joint_trajectory.header.frame_id =
-          "/world"; // Frame in which this is specified.
-      // Set the names of the joints being used.  All must be present.
-      joint_trajectory.joint_names.clear();
-      joint_trajectory.joint_names.push_back("linear_arm_actuator_joint");
-      joint_trajectory.joint_names.push_back("shoulder_pan_joint");
-      joint_trajectory.joint_names.push_back("shoulder_lift_joint");
-      joint_trajectory.joint_names.push_back("elbow_joint");
-      joint_trajectory.joint_names.push_back("wrist_1_joint");
-      joint_trajectory.joint_names.push_back("wrist_2_joint");
-      joint_trajectory.joint_names.push_back("wrist_3_joint");
+        T_des[0][3] = desired.position.x;
+        T_des[1][3] = desired.position.y;
+        T_des[2][3] = desired.position.z + 0.3; // above part
+        T_des[3][3] = 1.0;
+        // The orientation of the end effector so that the end effector is down.
+        T_des[0][0] = 0.0;
+        T_des[0][1] = -1.0;
+        T_des[0][2] = 0.0;
+        T_des[1][0] = 0.0;
+        T_des[1][1] = 0.0;
+        T_des[1][2] = 1.0;
+        T_des[2][0] = -1.0;
+        T_des[2][1] = 0.0;
+        T_des[2][2] = 0.0;
+        T_des[3][0] = 0.0;
+        T_des[3][1] = 0.0;
+        T_des[3][2] = 0.0;
 
-      joint_trajectory.points.resize(2);
+        const int num_sols =
+            ur_kinematics::inverse((double *)&T_des, (double *)&q_des, 0.0);
 
-      joint_trajectory.points[0].positions.resize(
-          joint_trajectory.joint_names.size());
-      joint_trajectory.points[1].positions.resize(
-          joint_trajectory.joint_names.size());
+        if (num_sols < 1) {
+          ROS_ERROR("No solutions found via inverse kinematics!");
+          // ros::shutdown();
+        }
 
-      joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
-      joint_trajectory.points[1].time_from_start = ros::Duration(1.0);
+        trajectory_msgs::JointTrajectory joint_trajectory;
 
-      for (int indy = 0; indy < joint_trajectory.joint_names.size(); indy++) {
-        for (int indz = 0; indz < g_joint_state.name.size(); indz++) {
-          if (joint_trajectory.joint_names[indy] == g_joint_state.name[indz]) {
-            joint_trajectory.points[0].positions[indy] =
-                g_joint_state.position[indz];
-            break;
+        joint_trajectory.header.seq = traj_count++;
+        joint_trajectory.header.stamp =
+            ros::Time::now(); // When was this message created.
+        joint_trajectory.header.frame_id =
+            "/world"; // Frame in which this is specified.
+        // Set the names of the joints being used.  All must be present.
+        joint_trajectory.joint_names.clear();
+        joint_trajectory.joint_names.push_back("linear_arm_actuator_joint");
+        joint_trajectory.joint_names.push_back("shoulder_pan_joint");
+        joint_trajectory.joint_names.push_back("shoulder_lift_joint");
+        joint_trajectory.joint_names.push_back("elbow_joint");
+        joint_trajectory.joint_names.push_back("wrist_1_joint");
+        joint_trajectory.joint_names.push_back("wrist_2_joint");
+        joint_trajectory.joint_names.push_back("wrist_3_joint");
+
+        joint_trajectory.points.resize(2);
+
+        joint_trajectory.points[0].positions.resize(
+            joint_trajectory.joint_names.size());
+        joint_trajectory.points[1].positions.resize(
+            joint_trajectory.joint_names.size());
+
+        joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
+        joint_trajectory.points[1].time_from_start = ros::Duration(5.0);
+
+        for (int indy = 0; indy < joint_trajectory.joint_names.size(); indy++) {
+          for (int indz = 0; indz < g_joint_state.name.size(); indz++) {
+            if (joint_trajectory.joint_names[indy] ==
+                g_joint_state.name[indz]) {
+              joint_trajectory.points[0].positions[indy] =
+                  g_joint_state.position[indz];
+              break;
+            }
           }
         }
-      }
 
-      int q_des_indx = 0;
-      // Set the end point for the movement
-      // Set the linear_arm_actuator_joint from joint_states as it is not part
-      // of the inverse
-      joint_trajectory.points[1].positions[0] = g_joint_state.position[1];
-      // The actuators are commanded in an odd order, enter the joint positions
-      // in the correct
-      for (int indy = 0; indy < 6; indy++) {
-        joint_trajectory.points[1].positions[indy + 1] =
-            q_des[q_des_indx][indy];
-      }
+        int q_des_indx = 1;
+        // Set the end point for the movement
+        // Set the linear_arm_actuator_joint from joint_states as it is not part
+        // of the inverse
+        joint_trajectory.points[1].positions[0] = g_joint_state.position[1];
+        // The actuators are commanded in an odd order, enter the joint
+        // positions in the correct
+        for (int indy = 0; indy < 6; indy++) {
+          joint_trajectory.points[1].positions[indy + 1] =
+              q_des[q_des_indx][indy];
+        }
 
-      traj_pub.publish(joint_trajectory);
+        traj_pub.publish(joint_trajectory);
+      }
     }
 
     ros::spinOnce();
@@ -356,3 +392,5 @@ int main(int argc, char **argv) {
 
   return 0;
 }
+
+void select_ik_solution();
