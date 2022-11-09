@@ -27,6 +27,8 @@
 #include <queue>
 #include <string>
 
+#include <boost/thread.hpp>
+
 using osrf_gear::LogicalCameraImage;
 
 template <size_t N>
@@ -90,7 +92,7 @@ geometry_msgs::TransformStamped
 get_robot_to_frame(const std::string &to_frame) {
   geometry_msgs::TransformStamped tf;
   try {
-    tf = g_tf_buf.lookupTransform("arm1_vacuum_gripper_link", to_frame,
+    tf = g_tf_buf.lookupTransform("arm1_base_link", to_frame,
                                   ros::Time(0.0), ros::Duration(1.0));
   } catch (tf2::TransformException &ex) {
     ROS_ERROR("%s", ex.what());
@@ -257,7 +259,10 @@ int main(int argc, char **argv) {
 
   ROS_INFO("Before loop");
 
-  ros::spinOnce();
+  ros::AsyncSpinner spinner(boost::thread::hardware_concurrency());
+  spinner.start();
+
+  // spinner.spin();
 
   geometry_msgs::Pose start_pose;
   // start_pose.position.x = -0.25;
@@ -268,7 +273,7 @@ int main(int argc, char **argv) {
   start_pose.position.y = -0.06;
   start_pose.position.z = 1.54 + 0.5;
 
-  g_transform_queue.push(start_pose);
+  // g_transform_queue.push(start_pose);
 
   ros::Rate r(10);
   while (ros::ok()) {
@@ -370,7 +375,7 @@ int main(int argc, char **argv) {
           }
         }
 
-        int q_des_indx = 1;
+        int q_des_indx = 0;
         // Set the end point for the movement
         // Set the linear_arm_actuator_joint from joint_states as it is not part
         // of the inverse
@@ -386,7 +391,6 @@ int main(int argc, char **argv) {
       }
     }
 
-    ros::spinOnce();
     r.sleep();
   }
 
