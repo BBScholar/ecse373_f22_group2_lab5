@@ -60,9 +60,11 @@ LogicalCameraArray<6> g_bin_images;
 LogicalCameraArray<2> g_agv_images;
 LogicalCameraArray<2> g_quality_images;
 
+void get_current_joint_state(double*);
+
 bool close_to(double *a, double *b, int n) {
   bool eq = true;
-  const double threshold = 0.01;
+  const double threshold = 0.1;
   for (int i = 0; i < n; i++) {
     const double diff = std::abs(a[i] - b[i]);
     eq &= (diff < threshold);
@@ -95,7 +97,7 @@ get_robot_to_frame(const std::string &to_frame) {
     tf = g_tf_buf.lookupTransform("arm1_base_link", to_frame,
                                   ros::Time(0.0), ros::Duration(1.0));
   } catch (tf2::TransformException &ex) {
-    ROS_ERROR("%s", ex.what());
+    ROS_ERROR("Transform fetch error: %s", ex.what());
   }
   return tf;
 }
@@ -141,8 +143,10 @@ void process_order(const osrf_gear::Order &order) {
             adjust_pose(goal_pose);
             geometry_msgs::Point pos = goal_pose.pose.position;
 
-            ROS_INFO("Adding transform to queue");
-            g_transform_queue.push(goal_pose.pose);
+            if(su.unit_id == "bin4") {
+                ROS_INFO("Adding transform to queue");
+                g_transform_queue.push(goal_pose.pose);
+            }
 
             ROS_WARN_ONCE("Position of %s: (%f, %f, %f)", p.type.c_str(), pos.x,
                           pos.y, pos.z);
@@ -269,11 +273,18 @@ int main(int argc, char **argv) {
   // start_pose.position.y = 0.53;
   // start_pose.position.z = 0.72;
 
-  start_pose.position.x = 0.62;
-  start_pose.position.y = -0.06;
-  start_pose.position.z = 1.54 + 0.5;
+//  start_pose.position.x = -0.55;
+//  start_pose.position.y = 0.533;
+//  start_pose.position.z = 0.1;
 
-  // g_transform_queue.push(start_pose);
+    start_pose.position.x = -0.2;
+    start_pose.position.y = 0.2;
+    start_pose.position.z = 0.2;
+
+    g_transform_queue.push(start_pose);
+
+    start_pose.position.y = -0.2;
+    g_transform_queue.push(start_pose);
 
   ros::Rate r(10);
   while (ros::ok()) {
@@ -285,12 +296,10 @@ int main(int argc, char **argv) {
     }
 
     ROS_INFO_THROTTLE(10, "Setting current joint states");
-    std::cout.flush();
 
     if (g_joint_state.position.size() >= 7) {
-      for (int i = 0; i < 6; ++i) {
-        q_pose[i] = g_joint_state.position[i + 1];
-      }
+
+        get_current_joint_state(q_pose);
 
       ur_kinematics::forward((double *)&q_pose, (double *)&T_current);
       ROS_INFO_THROTTLE(5, "Current position: %0f %0f %0f", T_current[0][3],
@@ -313,7 +322,7 @@ int main(int argc, char **argv) {
 
         T_des[0][3] = desired.position.x;
         T_des[1][3] = desired.position.y;
-        T_des[2][3] = desired.position.z + 0.3; // above part
+        T_des[2][3] = desired.position.z; //+ 0.3; // above part
         T_des[3][3] = 1.0;
         // The orientation of the end effector so that the end effector is down.
         T_des[0][0] = 0.0;
@@ -334,8 +343,10 @@ int main(int argc, char **argv) {
 
         if (num_sols < 1) {
           ROS_ERROR("No solutions found via inverse kinematics!");
-          // ros::shutdown();
+          continue;
+//           ros::shutdown();
         }
+        ROS_INFO("There are %0d IV solutions", num_sols);
 
         trajectory_msgs::JointTrajectory joint_trajectory;
 
@@ -362,7 +373,7 @@ int main(int argc, char **argv) {
             joint_trajectory.joint_names.size());
 
         joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
-        joint_trajectory.points[1].time_from_start = ros::Duration(5.0);
+        joint_trajectory.points[1].time_from_start = ros::Duration(3.0);
 
         for (int indy = 0; indy < joint_trajectory.joint_names.size(); indy++) {
           for (int indz = 0; indz < g_joint_state.name.size(); indz++) {
@@ -397,4 +408,35 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-void select_ik_solution();
+void select_ik_solution(int num_sols, double q_sol[6][8]) {
+    for(int i = 0; i < num_sols; ++i) {
+
+    }
+}
+
+void get_current_joint_state(double* q) {
+    std::vector<std::string> order;
+    order.reserve(6);
+    order.emplace_back("shoulder_pan_joint");
+    order.emplace_back("shoulder_lift_joint");
+    order.emplace_back("elbow_joint");
+    order.emplace_back("wrist_1_joint");
+    order.emplace_back("wrist_2_joint");
+    order.emplace_back("wrist_3_joint");
+
+    int count = 0;
+
+    for(int i = 0; i < order.size(); ++i) {
+        q[i] = 0.0;
+        for(int j = 0; j < g_joint_state.name.size(); ++j) {
+           if(order[i] == g_joint_state.name[j]) {
+               q[i] = g_joint_state.position[j];
+               count++;
+           }
+        }
+    }
+
+    if(count != order.size()){
+        ROS_ERROR("Could not get current joint_state correctly. Only %0d joints found.", count);
+    }
+}
