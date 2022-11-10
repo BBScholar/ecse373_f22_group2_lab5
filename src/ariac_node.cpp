@@ -228,7 +228,7 @@ int main(int argc, char **argv) {
         nh.subscribe<osrf_gear::LogicalCameraImage>(topic, 16, callback);
   }
 
-  ROS_INFO("Subsribing to agv and  quality cameras");
+  ROS_INFO("Subscribing to agv and  quality cameras");
   // generate subscribers for agv and quality camera
   for (int i = 1; i <= 2; ++i) {
     const std::string agv_topic =
@@ -256,7 +256,7 @@ int main(int argc, char **argv) {
   tf2_ros::TransformListener tfListener(g_tf_buf);
 
   double q_pose[6], q_des[6][8];
-  double T_current[4][4], T_des[4][4];
+  double T_current[4][4], T_des[4][4], T_goal[4][4];
 
   int traj_count = 0;
   bool first = true;
@@ -306,11 +306,11 @@ int main(int argc, char **argv) {
                         T_current[1][3], T_current[2][3]);
 
       if (g_transform_queue.size() < 1) {
-        ROS_INFO("No transforms in queue");
+        ROS_INFO_THROTTLE(5, "No transforms in queue");
       }
 
       if ((first && g_transform_queue.size() > 0) ||
-          (stopped() && close_to(&T_current[0][0], &T_des[0][0], 16) &&
+          (stopped() && close_to(&T_current[0][0], &T_goal[0][0], 16) &&
            g_transform_queue.size() > 0)) {
         first = false;
         ROS_INFO("Getting new transform...");
@@ -322,7 +322,7 @@ int main(int argc, char **argv) {
 
         T_des[0][3] = desired.position.x;
         T_des[1][3] = desired.position.y;
-        T_des[2][3] = desired.position.z; //+ 0.3; // above part
+        T_des[2][3] = desired.position.z; // above part
         T_des[3][3] = 1.0;
         // The orientation of the end effector so that the end effector is down.
         T_des[0][0] = 0.0;
@@ -346,6 +346,7 @@ int main(int argc, char **argv) {
           continue;
 //           ros::shutdown();
         }
+        std::memcpy((double*) &T_goal,(double*)&T_des, sizeof(double) * 16);
         ROS_INFO("There are %0d IV solutions", num_sols);
 
         trajectory_msgs::JointTrajectory joint_trajectory;
