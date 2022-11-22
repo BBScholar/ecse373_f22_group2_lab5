@@ -9,11 +9,11 @@ project(ariac_group2)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   osrf_gear
-  test_ariac
-  ecse_373_ariac
+  # test_ariac
   ecse_373_ariac
   roscpp
   rviz
+  ur_kinematics
 )
 
 ## System dependencies are found with CMake's conventions
@@ -101,6 +101,7 @@ catkin_package(
 include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
+  ur10_kin
 )
 
 ## Declare a C++ library

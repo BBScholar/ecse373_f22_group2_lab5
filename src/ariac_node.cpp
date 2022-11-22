@@ -60,7 +60,7 @@ LogicalCameraArray<6> g_bin_images;
 LogicalCameraArray<2> g_agv_images;
 LogicalCameraArray<2> g_quality_images;
 
-void get_current_joint_state(double*);
+void get_current_joint_state(double *);
 
 bool close_to(double *a, double *b, int n) {
   bool eq = true;
@@ -90,12 +90,16 @@ void adjust_pose(geometry_msgs::PoseStamped &pose) {
   pose.pose.orientation.z = 0.0;
 }
 
+void print_pose(const geometry_msgs::Pose &pose) {
+  ROS_DEBUG("%0f %0f %0f", pose.position.x, pose.position.y, pose.position.z);
+}
+
 geometry_msgs::TransformStamped
 get_robot_to_frame(const std::string &to_frame) {
   geometry_msgs::TransformStamped tf;
   try {
-    tf = g_tf_buf.lookupTransform("arm1_base_link", to_frame,
-                                  ros::Time(0.0), ros::Duration(1.0));
+    tf = g_tf_buf.lookupTransform("arm1_base_link", to_frame, ros::Time(0.0),
+                                  ros::Duration(1.0));
   } catch (tf2::TransformException &ex) {
     ROS_ERROR("Transform fetch error: %s", ex.what());
   }
@@ -143,9 +147,11 @@ void process_order(const osrf_gear::Order &order) {
             adjust_pose(goal_pose);
             geometry_msgs::Point pos = goal_pose.pose.position;
 
-            if(su.unit_id == "bin4") {
-                ROS_INFO("Adding transform to queue");
-                g_transform_queue.push(goal_pose.pose);
+            if (su.unit_id == "bin4") {
+              ROS_INFO("Adding transform to queue: %0f %0f %0f",
+                       goal_pose.pose.position.x, goal_pose.pose.position.y,
+                       goal_pose.pose.position.z);
+              g_transform_queue.push(part_pose.pose);
             }
 
             ROS_WARN_ONCE("Position of %s: (%f, %f, %f)", p.type.c_str(), pos.x,
@@ -173,12 +179,24 @@ int main(int argc, char **argv) {
 
   ros::NodeHandle nh;
 
+  tf2_ros::TransformListener tfListener(g_tf_buf);
+
+  while (ros::ok() &&
+         !g_tf_buf.canTransform("arm1_base_link", "logical_camera_bin4_frame",
+                                ros::Time(0, 0), ros::Duration(0.0)))
+    ;
+
   ros::ServiceClient begin_client =
       nh.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
 
   std_srvs::Trigger begin_comp;
 
   const bool send_success = begin_client.call(begin_comp);
+
+  while (ros::ok() &&
+         !g_tf_buf.canTransform("arm1_base_link", "logical_camera_bin4_frame",
+                                ros::Time(0, 0), ros::Duration(4.0)))
+    ;
 
   if (!send_success) {
     ROS_ERROR("Competition service call failed!  Goodness Gracious!!");
@@ -253,9 +271,8 @@ int main(int argc, char **argv) {
 
   // initialize transform stuff
   // tf2_ros::Buffer tfBuffer;
-  tf2_ros::TransformListener tfListener(g_tf_buf);
 
-  double q_pose[6], q_des[6][8];
+  double q_pose[6], q_des[8][6];
   double T_current[4][4], T_des[4][4], T_goal[4][4];
 
   int traj_count = 0;
@@ -273,18 +290,18 @@ int main(int argc, char **argv) {
   // start_pose.position.y = 0.53;
   // start_pose.position.z = 0.72;
 
-//  start_pose.position.x = -0.55;
-//  start_pose.position.y = 0.533;
-//  start_pose.position.z = 0.1;
+  //  start_pose.position.x = -0.55;
+  //  start_pose.position.y = 0.533;
+  //  start_pose.position.z = 0.1;
 
-    start_pose.position.x = -0.2;
-    start_pose.position.y = 0.2;
-    start_pose.position.z = 0.2;
+  start_pose.position.x = -0.2;
+  start_pose.position.y = 0.2;
+  start_pose.position.z = 0.2;
 
-    g_transform_queue.push(start_pose);
+  // g_transform_queue.push(start_pose);
 
-    start_pose.position.y = -0.2;
-    g_transform_queue.push(start_pose);
+  start_pose.position.y = -0.2;
+  // g_transform_queue.push(start_pose);
 
   ros::Rate r(10);
   while (ros::ok()) {
@@ -299,7 +316,7 @@ int main(int argc, char **argv) {
 
     if (g_joint_state.position.size() >= 7) {
 
-        get_current_joint_state(q_pose);
+      get_current_joint_state(q_pose);
 
       ur_kinematics::forward((double *)&q_pose, (double *)&T_current);
       ROS_INFO_THROTTLE(5, "Current position: %0f %0f %0f", T_current[0][3],
@@ -317,12 +334,26 @@ int main(int argc, char **argv) {
         const geometry_msgs::Pose desired = g_transform_queue.front();
         g_transform_queue.pop();
 
-        ROS_INFO("Going to position: %0f %0f %0f", desired.position.x,
-                 desired.position.y, desired.position.z);
+        geometry_msgs::TransformStamped tf;
 
-        T_des[0][3] = desired.position.x;
-        T_des[1][3] = desired.position.y;
-        T_des[2][3] = desired.position.z; // above part
+        try {
+          tf = g_tf_buf.lookupTransform("arm1_base_link",
+                                        "logical_camera_bin4_frame",
+                                        ros::Time(0.0), ros::Duration(1.0));
+        } catch (tf2::TransformException &ex) {
+          ROS_ERROR("Transform fetch error: %s", ex.what());
+        }
+
+        geometry_msgs::Pose goal_pose;
+
+        tf2::doTransform(desired, goal_pose, tf);
+
+        ROS_INFO("Going to position: %0f %0f %0f", goal_pose.position.x,
+                 goal_pose.position.y, goal_pose.position.z);
+
+        T_des[0][3] = goal_pose.position.x;
+        T_des[1][3] = goal_pose.position.y;
+        T_des[2][3] = goal_pose.position.z + 0.1; // above part
         T_des[3][3] = 1.0;
         // The orientation of the end effector so that the end effector is down.
         T_des[0][0] = 0.0;
@@ -344,9 +375,9 @@ int main(int argc, char **argv) {
         if (num_sols < 1) {
           ROS_ERROR("No solutions found via inverse kinematics!");
           continue;
-//           ros::shutdown();
+          //           ros::shutdown();
         }
-        std::memcpy((double*) &T_goal,(double*)&T_des, sizeof(double) * 16);
+        std::memcpy((double *)&T_goal, (double *)&T_des, sizeof(double) * 16);
         ROS_INFO("There are %0d IV solutions", num_sols);
 
         trajectory_msgs::JointTrajectory joint_trajectory;
@@ -410,34 +441,35 @@ int main(int argc, char **argv) {
 }
 
 void select_ik_solution(int num_sols, double q_sol[6][8]) {
-    for(int i = 0; i < num_sols; ++i) {
-
-    }
+  for (int i = 0; i < num_sols; ++i) {
+  }
 }
 
-void get_current_joint_state(double* q) {
-    std::vector<std::string> order;
-    order.reserve(6);
-    order.emplace_back("shoulder_pan_joint");
-    order.emplace_back("shoulder_lift_joint");
-    order.emplace_back("elbow_joint");
-    order.emplace_back("wrist_1_joint");
-    order.emplace_back("wrist_2_joint");
-    order.emplace_back("wrist_3_joint");
+void get_current_joint_state(double *q) {
+  std::vector<std::string> order;
+  order.reserve(6);
+  order.emplace_back("shoulder_pan_joint");
+  order.emplace_back("shoulder_lift_joint");
+  order.emplace_back("elbow_joint");
+  order.emplace_back("wrist_1_joint");
+  order.emplace_back("wrist_2_joint");
+  order.emplace_back("wrist_3_joint");
 
-    int count = 0;
+  int count = 0;
 
-    for(int i = 0; i < order.size(); ++i) {
-        q[i] = 0.0;
-        for(int j = 0; j < g_joint_state.name.size(); ++j) {
-           if(order[i] == g_joint_state.name[j]) {
-               q[i] = g_joint_state.position[j];
-               count++;
-           }
-        }
+  for (int i = 0; i < order.size(); ++i) {
+    q[i] = 0.0;
+    for (int j = 0; j < g_joint_state.name.size(); ++j) {
+      if (order[i] == g_joint_state.name[j]) {
+        q[i] = g_joint_state.position[j];
+        count++;
+      }
     }
+  }
 
-    if(count != order.size()){
-        ROS_ERROR("Could not get current joint_state correctly. Only %0d joints found.", count);
-    }
+  if (count != order.size()) {
+    ROS_ERROR(
+        "Could not get current joint_state correctly. Only %0d joints found.",
+        count);
+  }
 }
