@@ -42,12 +42,37 @@ Arm::Arm(const std::string &name)
   m_joint_state_sub = m_nh.subscribe<sensor_msgs::JointState>(
       joint_state_topic, 32, &Arm::joint_state_callback, this);
 
+  m_gripper_sub = m_nh.subscribe<osrf_gear::VacuumGripperState>(
+      base_topic + "/gripper/state", 32, &Arm::gripper_state_callback, this);
+
+  m_gripper_client = m_nh.serviceClient<osrf_gear::VacuumGripperControl>(
+      base_topic + "/gripper/control");
+
+  m_gripper_client.waitForExistence(ros::Duration(-1.0));
+
   ROS_INFO("Waiting for trajectory action server");
   m_trajectory_as.waitForServer();
   ROS_INFO("Trajectory server running");
 
   // m_trajectory_as = Actionlib
   // m_trajectory_as = {"/ariac/" + name + "/follow_joint_trajectory", true};
+}
+
+bool Arm::set_vacuum_enable(bool enable) {
+  osrf_gear::VacuumGripperControl srv;
+  srv.request.enable = enable;
+
+  m_gripper_client.call(srv);
+
+  return srv.response.success;
+}
+
+void Arm::gripper_state_callback(
+    const boost::shared_ptr<osrf_gear::VacuumGripperState const> &msg) {
+  ROS_INFO_STREAM_THROTTLE(10.0, "Recieved grippper state. Enabled="
+                                     << msg->enabled
+                                     << ", Attached=" << msg->attached);
+  m_current_gripper_state = *msg;
 }
 
 void Arm::joint_state_callback(
@@ -128,7 +153,9 @@ bool Arm::go_to_joint_state(ArmJointState joint_state, ros::Duration duration) {
 
   for (int i = 0; i < m_urk_ordering.size(); ++i) {
     joint_trajectory.points[0].positions.push_back(m_current_joint_state[i]);
+    joint_trajectory.points[0].velocities.push_back(0.0);
     joint_trajectory.points[1].positions.push_back(joint_state[i]);
+    joint_trajectory.points[1].velocities.push_back(0.0);
   }
 
   // ROS_INFO("Reached here 2");
@@ -207,6 +234,50 @@ bool Arm::move_arm(ArmJointState joint_state) {
   ros::Duration duration(dist * duration_per_distance);
 
   return go_to_joint_state(joint_state, duration);
+}
+
+bool Arm::pickup_part(geometry_msgs::Point point,
+                      geometry_msgs::Point camera_point, bool pickup) {
+  geometry_msgs::Point hover, waypoint;
+  hover = point;
+  hover.z += 0.1;
+
+  waypoint.x = camera_point.x;
+  waypoint.y = camera_point.y - 0.4;
+  waypoint.z = camera_point.z - 0.3;
+
+  ros::AsyncSpinner spinner(1);
+  spinner.start();
+
+  go_to_home_pose();
+  ros::Duration(0.25).sleep();
+  go_to_local_pose(waypoint);
+  ros::Duration(0.25).sleep();
+  go_to_local_pose(hover);
+
+  if (pickup) {
+    set_vacuum_enable(true);
+  }
+  ros::Duration(0.25).sleep();
+
+  go_to_local_pose(point);
+
+  if (!pickup) {
+    // if dropping off part, disable vacuum
+    set_vacuum_enable(false);
+  }
+  // wait for correct vacuum state
+  ros::Duration(0.5).sleep();
+  while (ros::ok() && m_current_gripper_state.attached != pickup)
+    ros::Duration(0.1).sleep();
+
+  go_to_local_pose(hover);
+  ros::Duration(0.25).sleep();
+  go_to_local_pose(waypoint);
+  ros::Duration(0.25).sleep();
+  go_to_home_pose();
+
+  return true;
 }
 
 bool Arm::go_to_local_pose(geometry_msgs::Point point) {

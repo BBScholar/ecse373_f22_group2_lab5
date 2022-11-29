@@ -15,6 +15,9 @@
 
 #include "control_msgs/FollowJointTrajectoryAction.h"
 
+#include "osrf_gear/VacuumGripperControl.h"
+#include "osrf_gear/VacuumGripperState.h"
+
 using ArmJointState = std::array<double, 7>;
 
 class Arm {
@@ -29,12 +32,19 @@ public:
   bool move_arm(ArmJointState joint_state);
 
   bool go_to_local_pose(geometry_msgs::Point point);
-
   bool go_to_home_pose();
+
+  bool pickup_part(geometry_msgs::Point point,
+                   geometry_msgs::Point camera_point, bool pickup = true);
+
+  bool set_vacuum_enable(bool enable);
 
 private:
   void joint_state_callback(
       const boost::shared_ptr<sensor_msgs::JointState const> &msg);
+
+  void gripper_state_callback(
+      const boost::shared_ptr<osrf_gear::VacuumGripperState const> &msg);
 
   geometry_msgs::Pose joint_state_to_pose(ArmJointState joint_state);
 
@@ -49,6 +59,7 @@ private:
   // current state
   ArmJointState m_current_joint_state;
   geometry_msgs::PoseStamped m_current_pose_local;
+  osrf_gear::VacuumGripperState m_current_gripper_state;
 
   // subscribers
   ros::Subscriber m_joint_state_sub;
@@ -56,6 +67,9 @@ private:
 
   // publishers
   ros::Publisher m_trajectory_pub;
+
+  // services
+  ros::ServiceClient m_gripper_client;
 
   // action server
   actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction>

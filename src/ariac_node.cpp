@@ -246,12 +246,10 @@ int main(int argc, char **argv) {
   }
   ROS_INFO("Before loop");
 
-  {
-    ros::Duration d(5.0);
-    d.sleep();
-  }
+  // ros::Duration(5.0).sleep();
 
   arm.go_to_home_pose();
+  ros::Duration(2.0).sleep();
 
   ros::Rate r(10);
   while (ros::ok()) {
@@ -268,23 +266,30 @@ int main(int argc, char **argv) {
 
       // current_goal.position.z -= 0.20;
 
-      geometry_msgs::Pose goal_pose;
+      geometry_msgs::Pose goal_pose, camera_pose, blank_pose;
       goal_pose.position.x = 0;
       goal_pose.position.y = 0;
       goal_pose.position.z = 0;
 
-      arm.move_linear_actuator(-0.2);
+      blank_pose.position.x = 0;
+      blank_pose.position.y = 0;
+      blank_pose.position.z = 0;
+
+      arm.move_linear_actuator(-0.1);
 
       // hardcode this for now
       const auto tf = get_robot_to_frame("logical_camera_bin4_frame");
 
       tf2::doTransform(current_goal, goal_pose, tf);
+      tf2::doTransform(blank_pose, camera_pose, tf);
 
-      goal_pose.position.z += 0.1;
+      ros::Duration(0.5).sleep();
 
-      arm.go_to_local_pose(goal_pose.position);
-      ros::Duration slep(1.0);
-      slep.sleep();
+      arm.pickup_part(goal_pose.position, camera_pose.position, true);
+      ros::Duration(1.0).sleep();
+      arm.pickup_part(goal_pose.position, camera_pose.position, false);
+      ros::Duration(1.0).sleep();
+
     } else {
       arm.go_to_home_pose();
       ros::Duration slep(5.0);
