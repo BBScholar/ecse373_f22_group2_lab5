@@ -251,6 +251,8 @@ int main(int argc, char **argv) {
     d.sleep();
   }
 
+  arm.go_to_home_pose();
+
   ros::Rate r(10);
   while (ros::ok()) {
     if (g_orders.size() > 0) {
@@ -284,12 +286,7 @@ int main(int argc, char **argv) {
       ros::Duration slep(1.0);
       slep.sleep();
     } else {
-      geometry_msgs::Point goal;
-      goal.x = -0.3;
-      goal.y = 0.2;
-      goal.z = 0.3;
-
-      arm.go_to_local_pose(goal);
+      arm.go_to_home_pose();
       ros::Duration slep(5.0);
       slep.sleep();
     }

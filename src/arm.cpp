@@ -144,16 +144,14 @@ bool Arm::go_to_joint_state(ArmJointState joint_state, ros::Duration duration) {
   joint_trajectory_as.action_goal.goal_id.stamp = ros::Time::now();
   joint_trajectory_as.action_goal.goal_id.id = std::to_string(as_count - 1);
 
-  // actionlib::SimpleClientGoalState state =
-  //     m_trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal,
-  //                                     ros::Duration(30.0),
-  //                                     ros::Duration(30.0));
-  // ROS_INFO("Action Server returned with status: %s",
-  // state.toString().c_str());
+  actionlib::SimpleClientGoalState state =
+      m_trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal,
+                                      ros::Duration(30.0), ros::Duration(30.0));
+  ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
 
-  m_trajectory_pub.publish(joint_trajectory);
-  ros::Duration wait_dur = duration + duration;
-  wait_dur.sleep();
+  // m_trajectory_pub.publish(joint_trajectory);
+  // ros::Duration wait_dur = duration + duration;
+  // wait_dur.sleep();
 
   return true;
 }
@@ -262,4 +260,12 @@ geometry_msgs::Pose Arm::joint_state_to_pose(ArmJointState joint_state) {
   pose.position.z = T[2][3];
 
   return pose;
+}
+
+bool Arm::go_to_home_pose() {
+  geometry_msgs::Point goal;
+  goal.x = -0.3;
+  goal.y = 0.2;
+  goal.z = 0.3;
+  return go_to_local_pose(goal);
 }

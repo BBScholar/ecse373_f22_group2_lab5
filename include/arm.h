@@ -30,6 +30,8 @@ public:
 
   bool go_to_local_pose(geometry_msgs::Point point);
 
+  bool go_to_home_pose();
+
 private:
   void joint_state_callback(
       const boost::shared_ptr<sensor_msgs::JointState const> &msg);
