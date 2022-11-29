@@ -4,5 +4,10 @@ The code in ariac_node.cpp takes in order information and camera sensor data by 
 
 ```bash
 #RUN code from roslaunch
-roslaunch ariac_group2 run_comp.launch &
+# roslaunch ariac_group2 run_comp.launch &
+
+# for some reason the node does not work when launched from launch file
+# it does, however, worked when run as rosrun
+roslaunch ecse_373_ariac ecse_373_ariac.launch &
+rosrun cwru_ecse_373_submission ariac_node
 ```

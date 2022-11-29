@@ -165,7 +165,7 @@ bool Arm::move_linear_actuator(double position) {
   }
   joint_state[0] = position;
 
-  const double duration_per_meter = 0.25;
+  const double duration_per_meter = 0.8;
   double dist = std::abs(position - m_current_joint_state[0]);
 
   if (dist < 0.01) {
@@ -201,7 +201,7 @@ bool Arm::move_arm(ArmJointState joint_state) {
     dist = 0.01;
   }
 
-  const double duration_per_distance = 1.25;
+  const double duration_per_distance = 2;
 
   ROS_INFO("Move arm %f meters in %f seconds.", dist,
            dist * duration_per_distance);

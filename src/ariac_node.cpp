@@ -170,10 +170,11 @@ int main(int argc, char **argv) {
   Arm arm("arm1");
 
   auto order_sub = nh.subscribe("/ariac/orders", 2, order_callback);
-  while (ros::ok() &&
-         !g_tf_buf.canTransform("arm1_base_link", "logical_camera_bin4_frame",
-                                ros::Time(0, 0), ros::Duration(1.0)))
-    ;
+  // while (ros::ok() &&
+  //        !g_tf_buf.canTransform("arm1_base_link",
+  //        "logical_camera_bin4_frame",
+  //                               ros::Time(0, 0), ros::Duration(1.0)))
+  //   ;
 
   // subscribe to order topic
 
