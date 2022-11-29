@@ -238,6 +238,8 @@ bool Arm::move_arm(ArmJointState joint_state) {
 
 bool Arm::pickup_part(geometry_msgs::Point point,
                       geometry_msgs::Point camera_point, bool pickup) {
+  point.z += 0.015;
+
   geometry_msgs::Point hover, waypoint;
   hover = point;
   hover.z += 0.1;
@@ -267,7 +269,7 @@ bool Arm::pickup_part(geometry_msgs::Point point,
     set_vacuum_enable(false);
   }
   // wait for correct vacuum state
-  ros::Duration(0.5).sleep();
+  ros::Duration(0.3).sleep();
   while (ros::ok() && m_current_gripper_state.attached != pickup)
     ros::Duration(0.1).sleep();
 
@@ -311,10 +313,30 @@ bool Arm::go_to_local_pose(geometry_msgs::Point point) {
     return false;
   }
 
+  std::stringstream ss;
+  ss << "\n";
+  for (int i = 0; i < num_sols; ++i) {
+    ss << "Solution #" << i << ": ";
+    for (int j = 0; j < 6; ++j) {
+      ss << q_des[i][j] << " ";
+    }
+    ss << "\n";
+  }
+
+  int sol_idx = 0;
+  for (int i = 0; i < num_sols; ++i) {
+    if (q_des[i][3] > M_PI && q_des[i][1] > M_PI) {
+      sol_idx = i;
+      break;
+    }
+  }
+
+  ROS_INFO_STREAM_THROTTLE(3.0, "IK Joint state array: " << ss.str());
+
   ArmJointState joint_state;
   joint_state[0] = 0.0;
   for (int i = 0; i < 6; ++i) {
-    joint_state[i + 1] = q_des[0][i];
+    joint_state[i + 1] = q_des[sol_idx][i];
   }
 
   return move_arm(joint_state);

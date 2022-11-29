@@ -275,7 +275,7 @@ int main(int argc, char **argv) {
       blank_pose.position.y = 0;
       blank_pose.position.z = 0;
 
-      arm.move_linear_actuator(-0.1);
+      arm.move_linear_actuator(-0.2);
 
       // hardcode this for now
       const auto tf = get_robot_to_frame("logical_camera_bin4_frame");
@@ -283,17 +283,18 @@ int main(int argc, char **argv) {
       tf2::doTransform(current_goal, goal_pose, tf);
       tf2::doTransform(blank_pose, camera_pose, tf);
 
-      ros::Duration(0.5).sleep();
+      // arm.move_linear_actuator(camera_pose.position.y - 0.2);
+
+      ros::Duration(0.1).sleep();
 
       arm.pickup_part(goal_pose.position, camera_pose.position, true);
-      ros::Duration(1.0).sleep();
+      ros::Duration(0.3).sleep();
       arm.pickup_part(goal_pose.position, camera_pose.position, false);
-      ros::Duration(1.0).sleep();
+      ros::Duration(0.3).sleep();
 
     } else {
       arm.go_to_home_pose();
-      ros::Duration slep(5.0);
-      slep.sleep();
+      ros::Duration(5.0).sleep();
     }
 
     r.sleep();
