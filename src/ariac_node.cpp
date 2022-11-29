@@ -270,7 +270,7 @@ int main(int argc, char **argv) {
       goal_pose.position.y = 0;
       goal_pose.position.z = 0;
 
-      arm.move_linear_actuator(-0.1);
+      arm.move_linear_actuator(-0.2);
 
       // hardcode this for now
       const auto tf = get_robot_to_frame("logical_camera_bin4_frame");
@@ -281,6 +281,15 @@ int main(int argc, char **argv) {
 
       arm.go_to_local_pose(goal_pose.position);
       ros::Duration slep(1.0);
+      slep.sleep();
+    } else {
+      geometry_msgs::Point goal;
+      goal.x = -0.3;
+      goal.y = 0.2;
+      goal.z = 0.3;
+
+      arm.go_to_local_pose(goal);
+      ros::Duration slep(5.0);
       slep.sleep();
     }
 

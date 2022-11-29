@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(ariac_group2)
+project(cwru_ecse_373_submission)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++14)
@@ -9,7 +9,6 @@ add_compile_options(-std=c++14)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   osrf_gear
-  # test_ariac
   ecse_373_ariac
   roscpp
   rviz

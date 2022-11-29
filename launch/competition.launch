@@ -1,0 +1,19 @@
+<launch>
+  <arg name="python" default="true" />
+  <arg name="development" default="true" />
+  <arg name="verbose" default="false" />
+  <arg name="state_logging" default="false" />
+  <arg name="no_gui" default="false" />
+  <arg name="fill_demo_shipment" default="false" />
+
+  <include file="$(find ecse_373_ariac)/launch/ecse_373_ariac.launch">
+    <arg name="python" value="$(arg python)"  />
+    <arg name="development" value="$(arg development)"  />
+    <arg name="verbose" value="$(arg verbose)"  />
+    <arg name="state_logging" value="$(arg state_logging)"  />
+    <arg name="no_gui" value="$(arg no_gui)"  />
+    <arg name="fill_demo_shipment" value="$(arg fill_demo_shipment)"  />
+  </include>
+
+  <node name="group2_ariac" pkg="cwru_ecse_373_submission" type="ariac_node" output="screen" />
+</launch>

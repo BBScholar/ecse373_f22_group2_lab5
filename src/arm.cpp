@@ -36,6 +36,9 @@ Arm::Arm(const std::string &name)
   m_urk_ordering.emplace_back("wrist_2_joint");
   m_urk_ordering.emplace_back("wrist_3_joint");
 
+  m_trajectory_pub = m_nh.advertise<trajectory_msgs::JointTrajectory>(
+      base_topic + "/arm/command", 2);
+
   m_joint_state_sub = m_nh.subscribe<sensor_msgs::JointState>(
       joint_state_topic, 32, &Arm::joint_state_callback, this);
 
@@ -141,12 +144,17 @@ bool Arm::go_to_joint_state(ArmJointState joint_state, ros::Duration duration) {
   joint_trajectory_as.action_goal.goal_id.stamp = ros::Time::now();
   joint_trajectory_as.action_goal.goal_id.id = std::to_string(as_count - 1);
 
-  actionlib::SimpleClientGoalState state =
-      m_trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal,
-                                      ros::Duration(30.0), ros::Duration(30.0));
-  ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
-  // ROS_INFO("Reached here 3");
   // actionlib::SimpleClientGoalState state =
+  //     m_trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal,
+  //                                     ros::Duration(30.0),
+  //                                     ros::Duration(30.0));
+  // ROS_INFO("Action Server returned with status: %s",
+  // state.toString().c_str());
+
+  m_trajectory_pub.publish(joint_trajectory);
+  ros::Duration wait_dur = duration + duration;
+  wait_dur.sleep();
+
   return true;
 }
 

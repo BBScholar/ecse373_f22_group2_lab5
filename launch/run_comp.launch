@@ -1,5 +1,0 @@
-<launch>
-  <include file="$(find ecse_373_ariac)/launch/ecse_373_ariac.launch">
-  </include>
-  <node name="comp" pkg="ariac_group2" type="ariac_node" respawn="true"/>
-</launch>
