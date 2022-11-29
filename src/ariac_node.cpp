@@ -265,6 +265,7 @@ int main(int argc, char **argv) {
       g_transform_queue.pop();
 
       // current_goal.position.z -= 0.20;
+      geometry_msgs::Pose offset_pose;
 
       geometry_msgs::Pose goal_pose, camera_pose, blank_pose;
       goal_pose.position.x = 0;
@@ -275,10 +276,14 @@ int main(int argc, char **argv) {
       blank_pose.position.y = 0;
       blank_pose.position.z = 0;
 
-      arm.move_linear_actuator(-0.2);
+      auto tf = get_robot_to_frame("logical_camera_bin4_frame");
+      tf2::doTransform(blank_pose, offset_pose, tf);
+
+      // arm.move_linear_actuator(-0.1);
+      arm.move_linear_actuator_relative(offset_pose.position.y - 0.6);
 
       // hardcode this for now
-      const auto tf = get_robot_to_frame("logical_camera_bin4_frame");
+      tf = get_robot_to_frame("logical_camera_bin4_frame");
 
       tf2::doTransform(current_goal, goal_pose, tf);
       tf2::doTransform(blank_pose, camera_pose, tf);

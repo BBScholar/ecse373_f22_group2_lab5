@@ -282,6 +282,12 @@ bool Arm::pickup_part(geometry_msgs::Point point,
   return true;
 }
 
+bool Arm::move_linear_actuator_relative(double position) {
+  // ArmJointState joint_state;
+  const double abs_pos = m_current_joint_state[0] + position;
+  return move_linear_actuator(abs_pos);
+}
+
 bool Arm::go_to_local_pose(geometry_msgs::Point point) {
 
   double T_des[4][4];

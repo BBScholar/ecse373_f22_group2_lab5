@@ -29,6 +29,7 @@ public:
                          ros::Duration duration = ros::Duration(1.0));
 
   bool move_linear_actuator(double position);
+  bool move_linear_actuator_relative(double position);
   bool move_arm(ArmJointState joint_state);
 
   bool go_to_local_pose(geometry_msgs::Point point);
