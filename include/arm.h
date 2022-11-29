@@ -24,10 +24,10 @@ public:
 
   bool go_to_joint_state(ArmJointState joint_state);
 
-  bool move_linear_actuator(ArmJointState joint_state);
+  bool move_linear_actuator(double position);
   bool move_arm(ArmJointState joint_state);
 
-  bool go_to_local_pose();
+  bool go_to_local_pose(geometry_msgs::Point point);
 
 private:
   void joint_state_callback(

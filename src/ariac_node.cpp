@@ -143,6 +143,8 @@ void process_order(const osrf_gear::Order &order) {
   }
 }
 
+void start_competition() {}
+
 void order_callback(const osrf_gear::Order &order) {
   static int n = 0;
   ROS_INFO("Recieved order %d", n++);
@@ -153,6 +155,9 @@ int main(int argc, char **argv) {
   ros::init(argc, argv, "ariac_node");
 
   ros::NodeHandle nh;
+
+  ros::AsyncSpinner spinner(boost::thread::hardware_concurrency());
+  spinner.start();
 
   tf2_ros::TransformListener tfListener(g_tf_buf);
 
@@ -167,36 +172,9 @@ int main(int argc, char **argv) {
   auto order_sub = nh.subscribe("/ariac/orders", 2, order_callback);
   while (ros::ok() &&
          !g_tf_buf.canTransform("arm1_base_link", "logical_camera_bin4_frame",
-                                ros::Time(0, 0), ros::Duration(0.0)))
+                                ros::Time(0, 0), ros::Duration(1.0)))
     ;
 
-  ros::ServiceClient begin_client =
-      nh.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
-
-  std_srvs::Trigger begin_comp;
-
-  const bool send_success = begin_client.call(begin_comp);
-
-  while (ros::ok() &&
-         !g_tf_buf.canTransform("arm1_base_link", "logical_camera_bin4_frame",
-                                ros::Time(0, 0), ros::Duration(4.0)))
-    ;
-
-  if (!send_success) {
-    ROS_ERROR("Competition service call failed!  Goodness Gracious!!");
-    return 1;
-  }
-
-  const bool start_success = begin_comp.response.success;
-
-  if (!start_success) {
-    ROS_WARN("Competition service returned failure: %s",
-             begin_comp.response.message.c_str());
-    // TODO: Should this exit?
-  } else {
-    ROS_INFO("Competition service called successfully: %s",
-             begin_comp.response.message.c_str());
-  }
   // subscribe to order topic
 
   // material location service client
@@ -242,31 +220,35 @@ int main(int argc, char **argv) {
         quality_topic, 16, quality_callback);
   }
 
-  // initialize transform stuff
-  // tf2_ros::Buffer tfBuffer;
+  ros::ServiceClient begin_client =
+      nh.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
+  begin_client.waitForExistence();
 
+  std_srvs::Trigger begin_comp;
+
+  const bool send_success = begin_client.call(begin_comp);
+
+  if (!send_success) {
+    ROS_ERROR("Competition service call failed!  Goodness Gracious!!");
+    return 1;
+  }
+
+  const bool start_success = begin_comp.response.success;
+
+  if (!start_success) {
+    ROS_WARN("Competition service returned failure: %s",
+             begin_comp.response.message.c_str());
+    // TODO: Should this exit?
+  } else {
+    ROS_INFO("Competition service called successfully: %s",
+             begin_comp.response.message.c_str());
+  }
   ROS_INFO("Before loop");
 
-  ros::AsyncSpinner spinner(boost::thread::hardware_concurrency());
-  spinner.start();
-
-  geometry_msgs::Pose start_pose;
-  // start_pose.position.x = -0.25;
-  // start_pose.position.y = 0.53;
-  // start_pose.position.z = 0.72;
-
-  //  start_pose.position.x = -0.55;
-  //  start_pose.position.y = 0.533;
-  //  start_pose.position.z = 0.1;
-
-  start_pose.position.x = -0.2;
-  start_pose.position.y = 0.2;
-  start_pose.position.z = 0.2;
-
-  // g_transform_queue.push(start_pose);
-
-  start_pose.position.y = -0.2;
-  // g_transform_queue.push(start_pose);
+  {
+    ros::Duration d(5.0);
+    d.sleep();
+  }
 
   ros::Rate r(10);
   while (ros::ok()) {
@@ -277,13 +259,33 @@ int main(int argc, char **argv) {
       g_orders.pop();
     }
 
+    if (!g_transform_queue.empty()) {
+      auto current_goal = g_transform_queue.front();
+      g_transform_queue.pop();
+
+      // current_goal.position.z -= 0.20;
+
+      geometry_msgs::Pose goal_pose;
+      goal_pose.position.x = 0;
+      goal_pose.position.y = 0;
+      goal_pose.position.z = 0;
+
+      arm.move_linear_actuator(-0.1);
+
+      // hardcode this for now
+      const auto tf = get_robot_to_frame("logical_camera_bin4_frame");
+
+      tf2::doTransform(current_goal, goal_pose, tf);
+
+      goal_pose.position.z += 0.1;
+
+      arm.go_to_local_pose(goal_pose.position);
+      ros::Duration slep(1.0);
+      slep.sleep();
+    }
+
     r.sleep();
   }
 
   return 0;
-}
-
-void select_ik_solution(int num_sols, double q_sol[6][8]) {
-  for (int i = 0; i < num_sols; ++i) {
-  }
 }

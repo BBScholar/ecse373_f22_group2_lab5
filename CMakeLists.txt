@@ -42,7 +42,6 @@ catkin_package(
 include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
-  ur10_kin
   include
 )
 
@@ -77,6 +76,7 @@ add_executable(ariac_node
 ## Specify libraries to link a library or executable target against
 target_link_libraries(ariac_node
   ${catkin_LIBRARIES}
+  ur10_kin
 )
 
 
