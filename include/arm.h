@@ -22,7 +22,8 @@ public:
   Arm(const std::string &name);
   ~Arm() = default;
 
-  bool go_to_joint_state(ArmJointState joint_state);
+  bool go_to_joint_state(ArmJointState joint_state,
+                         ros::Duration duration = ros::Duration(1.0));
 
   bool move_linear_actuator(double position);
   bool move_arm(ArmJointState joint_state);
@@ -33,7 +34,7 @@ private:
   void joint_state_callback(
       const boost::shared_ptr<sensor_msgs::JointState const> &msg);
 
-  void transform_matrix_to_pose(double *T);
+  geometry_msgs::Pose joint_state_to_pose(ArmJointState joint_state);
 
 private:
   std::string m_name;
@@ -45,7 +46,7 @@ private:
 
   // current state
   ArmJointState m_current_joint_state;
-  geometry_msgs::PoseStamped m_current_pose_local, m_current_pose_global;
+  geometry_msgs::PoseStamped m_current_pose_local;
 
   // subscribers
   ros::Subscriber m_joint_state_sub;
