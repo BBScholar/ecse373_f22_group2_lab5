@@ -36,7 +36,8 @@ public:
   bool go_to_home_pose();
 
   bool pickup_part(geometry_msgs::Point point,
-                   geometry_msgs::Point camera_point, bool pickup = true);
+                   geometry_msgs::Point camera_point, bool left = true,
+                   bool agv = false, bool pickup = true);
 
   bool set_vacuum_enable(bool enable);
 

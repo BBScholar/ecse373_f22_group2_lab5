@@ -44,18 +44,11 @@ using ImageCallback = boost::function<void(LogicalCameraPtr)>;
 // constants
 constexpr int k_buffer_size = 16;
 
-// global services
-ros::ServiceClient g_material_location_client;
-
 // global transform listener
 tf2_ros::Buffer g_tf_buf;
-// tf2_ros::TransformListener g_tf_listener(g_tf_buf);You will find it
-// challenging to perform as well as those attending which could have a
-// detrimental effect on your grade.
 
 // global data
-std::queue<osrf_gear::Order> g_orders;
-std::queue<geometry_msgs::Pose> g_transform_queue;
+std::queue<osrf_gear::Shipment> g_shipment_queue;
 
 LogicalCameraArray<6> g_bin_images;
 LogicalCameraArray<2> g_agv_images;
@@ -86,69 +79,15 @@ get_robot_to_frame(const std::string &to_frame) {
   return tf;
 }
 
-// TODO: figure out where to calls this
-void process_order(const osrf_gear::Order &order) {
-  osrf_gear::GetMaterialLocations get_loc;
-  // loop over all shipments in order
-  for (const auto &s : order.shipments) {
-    // loop over every product in order
-    for (const auto &p : s.products) {
-      get_loc.request.material_type = p.type;
-      const bool send = g_material_location_client.call(get_loc);
-      if (!send) {
-        ROS_ERROR("Could not call material location client");
-        continue;
-      }
-
-      for (const osrf_gear::StorageUnit &su : get_loc.response.storage_units) {
-        ROS_INFO("Product %s is in %s", p.type.c_str(), su.unit_id.c_str());
-        if (su.unit_id == "belt") {
-
-        } else {
-          const char c = su.unit_id[3];
-          const int bin_num = (int(c) - int('0')) - 1;
-          const LogicalCameraImage &img = g_bin_images[bin_num];
-
-          const std::string camera_frame =
-              "logical_camera_" + su.unit_id + "_frame";
-          ROS_INFO("Getting transform to frame: %s", camera_frame.c_str());
-          const auto tf = get_robot_to_frame(camera_frame);
-
-          // for(const )
-
-          geometry_msgs::PoseStamped part_pose, goal_pose, camera_pose;
-
-          camera_pose.pose = img.pose;
-          // part_pose.pose = img.models[0].pose;
-
-          for (const auto &model : img.models) {
-            part_pose.pose = model.pose;
-            tf2::doTransform(part_pose, goal_pose, tf);
-            adjust_pose(goal_pose);
-            geometry_msgs::Point pos = goal_pose.pose.position;
-
-            if (su.unit_id == "bin4") {
-              ROS_INFO("Adding transform to queue: %0f %0f %0f",
-                       goal_pose.pose.position.x, goal_pose.pose.position.y,
-                       goal_pose.pose.position.z);
-              g_transform_queue.push(part_pose.pose);
-            }
-
-            ROS_WARN_ONCE("Position of %s: (%f, %f, %f)", p.type.c_str(), pos.x,
-                          pos.y, pos.z);
-          }
-        }
-      }
-    }
-  }
-}
-
-void start_competition() {}
-
 void order_callback(const osrf_gear::Order &order) {
   static int n = 0;
   ROS_INFO("Recieved order %d", n++);
-  g_orders.push(order);
+
+  for (const auto &s : order.shipments) {
+    // loop over every product in order
+    g_shipment_queue.push(s);
+    ROS_INFO("Adding shipment to queue");
+  }
 }
 
 int main(int argc, char **argv) {
@@ -161,21 +100,15 @@ int main(int argc, char **argv) {
 
   tf2_ros::TransformListener tfListener(g_tf_buf);
 
-  g_material_location_client =
+  auto material_location_client =
       nh.serviceClient<osrf_gear::GetMaterialLocations>(
           "/ariac/material_locations");
 
-  g_material_location_client.waitForExistence(ros::Duration(-1.0));
+  material_location_client.waitForExistence(ros::Duration(-1.0));
 
   Arm arm("arm1");
 
   auto order_sub = nh.subscribe("/ariac/orders", 2, order_callback);
-  // while (ros::ok() &&
-  //        !g_tf_buf.canTransform("arm1_base_link",
-  //        "logical_camera_bin4_frame",
-  //                               ros::Time(0, 0), ros::Duration(1.0)))
-  //   ;
-
   // subscribe to order topic
 
   // material location service client
@@ -244,65 +177,121 @@ int main(int argc, char **argv) {
     ROS_INFO("Competition service called successfully: %s",
              begin_comp.response.message.c_str());
   }
-  ROS_INFO("Before loop");
 
-  // ros::Duration(5.0).sleep();
+  ROS_INFO("Before loop");
 
   arm.go_to_home_pose();
   ros::Duration(2.0).sleep();
 
   ros::Rate r(10);
   while (ros::ok()) {
-    if (g_orders.size() > 0) {
-      ROS_INFO("Getting order");
-      const auto order = g_orders.front();
-      process_order(order);
-      g_orders.pop();
+
+    if (g_shipment_queue.empty()) {
+      r.sleep();
+      continue;
     }
 
-    if (!g_transform_queue.empty()) {
-      auto current_goal = g_transform_queue.front();
-      g_transform_queue.pop();
+    ROS_INFO("Putting together shipment");
 
-      // current_goal.position.z -= 0.20;
-      geometry_msgs::Pose offset_pose;
+    auto current_shipment = g_shipment_queue.front();
+    g_shipment_queue.pop();
 
-      geometry_msgs::Pose goal_pose, camera_pose, blank_pose;
+    const std::string shipment_type = current_shipment.shipment_type;
+    const std::string agv_id = current_shipment.agv_id;
+
+    double agv_lin;
+    std::string agv_camera_frame;
+
+    if (agv_id == "agv1" || agv_id == "either") {
+      agv_lin = 2.25;
+      agv_camera_frame = "logical_camera_agv1_frame";
+    } else {
+      agv_lin = -2.25;
+      agv_camera_frame = "logical_camera_agv2_frame";
+    }
+
+    for (const auto &part : current_shipment.products) {
+      std::string product_type = part.type;
+
+      osrf_gear::GetMaterialLocations material_loc;
+      material_loc.request.material_type = product_type;
+      if (!material_location_client.call(material_loc)) {
+        ROS_ERROR("Could not call material location service");
+        continue;
+      }
+
+      int bin_num;
+      std::string unit_id;
+
+      for (const osrf_gear::StorageUnit &su :
+           material_loc.response.storage_units) {
+        if (!std::strstr(su.unit_id.c_str(), "bin")) {
+          continue;
+        }
+        char c = su.unit_id[3];
+        bin_num = (int(c) - int('0')) - 1;
+        unit_id = su.unit_id;
+        break;
+      }
+      const LogicalCameraImage &img = g_bin_images[bin_num];
+      const std::string camera_frame = "logical_camera_" + unit_id + "_frame";
+
+      geometry_msgs::Pose camera_pose, part_pose, blank_pose;
+      geometry_msgs::Pose offset_pose, goal_pose;
+
       goal_pose.position.x = 0;
       goal_pose.position.y = 0;
       goal_pose.position.z = 0;
 
-      blank_pose.position.x = 0;
-      blank_pose.position.y = 0;
-      blank_pose.position.z = 0;
+      camera_pose = img.pose;
+      part_pose = img.models.front().pose;
 
-      auto tf = get_robot_to_frame("logical_camera_bin4_frame");
+      auto tf = get_robot_to_frame(camera_frame);
       tf2::doTransform(blank_pose, offset_pose, tf);
 
-      // arm.move_linear_actuator(-0.1);
-      arm.move_linear_actuator_relative(offset_pose.position.y - 0.6);
+      bool left = bin_num > 2;
 
-      // hardcode this for now
-      tf = get_robot_to_frame("logical_camera_bin4_frame");
+      const double linear_offset = 0.6;
+      if (left) {
+        arm.move_linear_actuator_relative(offset_pose.position.y -
+                                          linear_offset);
+      } else {
+        arm.move_linear_actuator_relative(offset_pose.position.y +
+                                          linear_offset);
+      }
 
-      tf2::doTransform(current_goal, goal_pose, tf);
+      ros::Duration(3.0).sleep();
+
+      tf = get_robot_to_frame(camera_frame);
+
+      tf2::doTransform(part_pose, goal_pose, tf);
       tf2::doTransform(blank_pose, camera_pose, tf);
 
-      // arm.move_linear_actuator(camera_pose.position.y - 0.2);
+      // pickup part
+      arm.pickup_part(goal_pose.position, camera_pose.position, left, false,
+                      true);
+      ros::Duration(1.0).sleep();
 
-      ros::Duration(0.1).sleep();
+      // move to agv
+      arm.move_linear_actuator(agv_lin);
+      ros::Duration(3.0).sleep();
 
-      arm.pickup_part(goal_pose.position, camera_pose.position, true);
-      ros::Duration(0.3).sleep();
-      arm.pickup_part(goal_pose.position, camera_pose.position, false);
-      ros::Duration(0.3).sleep();
+      geometry_msgs::Pose agv_camera_pose, agv_part_pose;
 
-    } else {
-      arm.go_to_home_pose();
-      ros::Duration(5.0).sleep();
+      tf = get_robot_to_frame(agv_camera_frame);
+
+      tf2::doTransform(blank_pose, agv_camera_pose, tf);
+      tf2::doTransform(part.pose, agv_part_pose, tf);
+
+      agv_part_pose.position.z = agv_camera_pose.position.z - 0.5;
+
+      // place part on agv
+      arm.pickup_part(agv_part_pose.position, agv_camera_pose.position,
+                      agv_id != "agv1", true, false);
+
+      ros::Duration(0.5).sleep();
     }
-
-    r.sleep();
+    ROS_INFO("Done with shipment");
   }
 
   return 0;

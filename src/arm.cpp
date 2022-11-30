@@ -80,7 +80,7 @@ void Arm::joint_state_callback(
 
   ArmJointState new_joint_state;
 
-  ROS_INFO_THROTTLE(10.0, "Received joint state update");
+  // ROS_INFO_THROTTLE(10.0, "Received joint state update");
 
   int count = 0;
 
@@ -110,7 +110,7 @@ void Arm::joint_state_callback(
     ss << "]";
 
     // ROS_INFO_THROTTLE_STREAM(10.0, "Joint state: " << ss.str());
-    ROS_INFO_STREAM_THROTTLE(10.0, "Joint state: " << ss.str());
+    ROS_INFO_STREAM_THROTTLE(1.0, "Current joint state: " << ss.str());
   }
 
   // ROS_INFO_STREAM_THROTTLE(10, "Joint state: " << );
@@ -153,9 +153,9 @@ bool Arm::go_to_joint_state(ArmJointState joint_state, ros::Duration duration) {
 
   for (int i = 0; i < m_urk_ordering.size(); ++i) {
     joint_trajectory.points[0].positions.push_back(m_current_joint_state[i]);
-    joint_trajectory.points[0].velocities.push_back(0.0);
+    // joint_trajectory.points[0].velocities.push_back(0.0);
     joint_trajectory.points[1].positions.push_back(joint_state[i]);
-    joint_trajectory.points[1].velocities.push_back(0.0);
+    // joint_trajectory.points[1].velocities.push_back(0.0);
   }
 
   // ROS_INFO("Reached here 2");
@@ -171,10 +171,26 @@ bool Arm::go_to_joint_state(ArmJointState joint_state, ros::Duration duration) {
   joint_trajectory_as.action_goal.goal_id.stamp = ros::Time::now();
   joint_trajectory_as.action_goal.goal_id.id = std::to_string(as_count - 1);
 
-  actionlib::SimpleClientGoalState state =
-      m_trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal,
-                                      ros::Duration(30.0), ros::Duration(30.0));
-  ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
+  // actionlib::SimpleClientGoalState state =
+  //     m_trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal,
+  //                                     ros::Duration(30.0),
+  //                                     ros::Duration(30.0));
+  // actionlib::SimpleClient
+  // if()
+  m_trajectory_as.sendGoal(joint_trajectory_as.action_goal.goal);
+  bool finished_before_timeout =
+      m_trajectory_as.waitForResult(ros::Duration(120.0));
+
+  if (finished_before_timeout) {
+    actionlib::SimpleClientGoalState state = m_trajectory_as.getState();
+    ROS_INFO("Trajectory finished with state %s with text: %s",
+             state.toString().c_str(), state.getText().c_str());
+  } else {
+    ROS_WARN("Trajectory did not finish before timeout");
+  }
+
+  // ROS_INFO("Action Server returned with status: %s. Text: %s",
+  //          state.toString().c_str(), state.getText().c_str());
 
   // m_trajectory_pub.publish(joint_trajectory);
   // ros::Duration wait_dur = duration + duration;
@@ -190,7 +206,7 @@ bool Arm::move_linear_actuator(double position) {
   }
   joint_state[0] = position;
 
-  const double duration_per_meter = 0.8;
+  const double duration_per_meter = 1.0;
   double dist = std::abs(position - m_current_joint_state[0]);
 
   if (dist < 0.01) {
@@ -212,10 +228,6 @@ bool Arm::move_arm(ArmJointState joint_state) {
   const auto current_pose = m_current_pose_local.pose;
   const auto goal_pose = joint_state_to_pose(joint_state);
 
-  ROS_INFO_STREAM("Move arm -- current_pose: " << pose_to_string(current_pose)
-                                               << ", goal_pose: "
-                                               << pose_to_string(goal_pose));
-
   const double x = current_pose.position.x - goal_pose.position.x;
   const double y = current_pose.position.y - goal_pose.position.y;
   const double z = current_pose.position.z - goal_pose.position.z;
@@ -226,7 +238,7 @@ bool Arm::move_arm(ArmJointState joint_state) {
     dist = 0.01;
   }
 
-  const double duration_per_distance = 2;
+  const double duration_per_distance = 1.5;
 
   ROS_INFO("Move arm %f meters in %f seconds.", dist,
            dist * duration_per_distance);
@@ -237,30 +249,40 @@ bool Arm::move_arm(ArmJointState joint_state) {
 }
 
 bool Arm::pickup_part(geometry_msgs::Point point,
-                      geometry_msgs::Point camera_point, bool pickup) {
+                      geometry_msgs::Point camera_point, bool left, bool agv,
+                      bool pickup) {
   point.z += 0.015;
 
   geometry_msgs::Point hover, waypoint;
   hover = point;
   hover.z += 0.1;
 
-  waypoint.x = camera_point.x;
-  waypoint.y = camera_point.y - 0.4;
+  if (!agv) {
+    waypoint.x = camera_point.x;
+    if (left) {
+      waypoint.y = camera_point.y - 0.4;
+    } else {
+      waypoint.y = camera_point.y + 0.4;
+    }
+  } else {
+    waypoint.x = camera_point.x - 0.4;
+    waypoint.y = camera_point.y;
+  }
   waypoint.z = camera_point.z - 0.3;
 
   ros::AsyncSpinner spinner(1);
   spinner.start();
 
   go_to_home_pose();
-  ros::Duration(0.25).sleep();
+  ros::Duration(0.1).sleep();
   go_to_local_pose(waypoint);
-  ros::Duration(0.25).sleep();
+  ros::Duration(0.1).sleep();
   go_to_local_pose(hover);
 
   if (pickup) {
     set_vacuum_enable(true);
   }
-  ros::Duration(0.25).sleep();
+  ros::Duration(0.1).sleep();
 
   go_to_local_pose(point);
 
@@ -274,10 +296,11 @@ bool Arm::pickup_part(geometry_msgs::Point point,
     ros::Duration(0.1).sleep();
 
   go_to_local_pose(hover);
-  ros::Duration(0.25).sleep();
+  ros::Duration(0.1).sleep();
   go_to_local_pose(waypoint);
-  ros::Duration(0.25).sleep();
+  ros::Duration(0.1).sleep();
   go_to_home_pose();
+  ros::Duration(0.1).sleep();
 
   return true;
 }
@@ -331,11 +354,13 @@ bool Arm::go_to_local_pose(geometry_msgs::Point point) {
 
   int sol_idx = 0;
   for (int i = 0; i < num_sols; ++i) {
-    if (q_des[i][3] > M_PI && q_des[i][1] > M_PI) {
+    if (q_des[i][3] > M_PI && q_des[i][1] > M_PI && q_des[i][2] < M_PI) {
       sol_idx = i;
       break;
     }
   }
+
+  ROS_INFO_STREAM("Choosing IK solution #" << sol_idx);
 
   ROS_INFO_STREAM_THROTTLE(3.0, "IK Joint state array: " << ss.str());
 
