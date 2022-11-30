@@ -1,11 +1,13 @@
 #include <ros/console.h>
 #include <ros/ros.h>
 
+#include "osrf_gear/AGVControl.h"
 #include "osrf_gear/GetMaterialLocations.h"
 #include "osrf_gear/LogicalCameraImage.h"
 #include "osrf_gear/Order.h"
 #include "osrf_gear/Product.h"
 #include "osrf_gear/Shipment.h"
+#include "osrf_gear/SubmitShipment.h"
 
 #include "sensor_msgs/JointState.h"
 
@@ -18,6 +20,8 @@
 #include "tf2_ros/transform_listener.h"
 
 #include "geometry_msgs/Pose.h"
+
+#include <std_msgs/String.h>
 
 #include <std_srvs/Trigger.h>
 
@@ -49,6 +53,8 @@ tf2_ros::Buffer g_tf_buf;
 
 // global data
 std::queue<osrf_gear::Shipment> g_shipment_queue;
+std::string g_agv1_state;
+std::string g_agv2_state;
 
 LogicalCameraArray<6> g_bin_images;
 LogicalCameraArray<2> g_agv_images;
@@ -90,6 +96,14 @@ void order_callback(const osrf_gear::Order &order) {
   }
 }
 
+void agv1_callback(const std_msgs::StringConstPtr &msg) {
+  g_agv1_state = msg->data;
+}
+
+void agv2_callback(const std_msgs::StringConstPtr &msg) {
+  g_agv2_state = msg->data;
+}
+
 int main(int argc, char **argv) {
   ros::init(argc, argv, "ariac_node");
 
@@ -106,12 +120,21 @@ int main(int argc, char **argv) {
 
   material_location_client.waitForExistence(ros::Duration(-1.0));
 
+  auto agv1_client = nh.serviceClient<osrf_gear::AGVControl>("/ariac/agv1");
+  auto agv2_client = nh.serviceClient<osrf_gear::AGVControl>("/ariac/agv2");
+  agv1_client.waitForExistence(ros::Duration(-1.0));
+  agv2_client.waitForExistence(ros::Duration(-1.0));
+
+  auto shipment_submision_client =
+      nh.serviceClient<osrf_gear::SubmitShipment>("/ariac/submit_shipment");
+  shipment_submision_client.waitForExistence();
+
   Arm arm("arm1");
 
   auto order_sub = nh.subscribe("/ariac/orders", 2, order_callback);
-  // subscribe to order topic
 
-  // material location service client
+  auto agv1_state_sub = nh.subscribe("/ariac/agv1/state", 32, agv1_callback);
+  auto agv2_state_sub = nh.subscribe("/ariac/agv2/state", 32, agv2_callback);
 
   // arrays of subsribers
   std::array<ros::Subscriber, 6> bin_camera_subs;
@@ -202,7 +225,7 @@ int main(int argc, char **argv) {
     double agv_lin;
     std::string agv_camera_frame;
 
-    if (agv_id == "agv1" || agv_id == "either") {
+    if (agv_id == "agv1") {
       agv_lin = 2.25;
       agv_camera_frame = "logical_camera_agv1_frame";
     } else {
@@ -260,7 +283,7 @@ int main(int argc, char **argv) {
                                           linear_offset);
       }
 
-      ros::Duration(3.0).sleep();
+      ros::Duration(1.0).sleep();
 
       tf = get_robot_to_frame(camera_frame);
 
@@ -274,10 +297,17 @@ int main(int argc, char **argv) {
 
       // move to agv
       arm.move_linear_actuator(agv_lin);
-      ros::Duration(3.0).sleep();
+      ros::Duration(1.0).sleep();
+
+      if (agv_id == "agv1") {
+        while (ros::ok() && g_agv1_state != "ready_to_deliver")
+          ros::Duration(0.1).sleep();
+      } else {
+        while (ros::ok() && g_agv2_state != "ready_to_deliver")
+          ros::Duration(0.1).sleep();
+      }
 
       geometry_msgs::Pose agv_camera_pose, agv_part_pose;
-
       tf = get_robot_to_frame(agv_camera_frame);
 
       tf2::doTransform(blank_pose, agv_camera_pose, tf);
@@ -292,6 +322,25 @@ int main(int argc, char **argv) {
       ros::Duration(0.5).sleep();
     }
     ROS_INFO("Done with shipment");
+
+    osrf_gear::AGVControl submit;
+    submit.request.shipment_type = shipment_type;
+
+    if (agv_id == "agv1") {
+      if (!agv1_client.call(submit)) {
+        ROS_ERROR("AGV1 client could not be callled");
+      } else if (!submit.response.success) {
+        ROS_ERROR("Submission from AGV1 unsuccessful with message: %s",
+                  submit.response.message.c_str());
+      }
+    } else {
+      if (!agv2_client.call(submit)) {
+        ROS_ERROR("AGV2 client could not be callled");
+      } else if (!submit.response.success) {
+        ROS_ERROR("Submission from AGV2 unsuccessful with message: %s",
+                  submit.response.message.c_str());
+      }
+    }
   }
 
   return 0;
