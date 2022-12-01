@@ -85,6 +85,21 @@ get_robot_to_frame(const std::string &to_frame) {
   return tf;
 }
 
+double yaw_from_pose(const geometry_msgs::Pose &pose) {
+  tf2::Quaternion q;
+  tf2::fromMsg(pose.orientation, q);
+
+  tf2::Matrix3x3 m(q);
+  double yaw, pitch, roll;
+
+  m.getRPY(roll, pitch, yaw);
+
+  ROS_WARN("RPY for pose: %f %f %f", roll, pitch, yaw);
+
+  // Yes, I know this looks wrong
+  return yaw;
+}
+
 void order_callback(const osrf_gear::Order &order) {
   static int n = 0;
   ROS_INFO("Recieved order %d", n++);
@@ -204,7 +219,9 @@ int main(int argc, char **argv) {
   ROS_INFO("Before loop");
 
   arm.go_to_home_pose();
-  ros::Duration(2.0).sleep();
+  ros::Duration(1.0).sleep();
+  arm.rotate_end_effector(0.0);
+  ros::Duration(1.0).sleep();
 
   ros::Rate r(10);
   while (ros::ok()) {
@@ -223,13 +240,16 @@ int main(int argc, char **argv) {
     const std::string agv_id = current_shipment.agv_id;
 
     double agv_lin;
+    int agv_num;
     std::string agv_camera_frame;
 
     if (agv_id == "agv1") {
       agv_lin = 2.25;
+      agv_num = 1;
       agv_camera_frame = "logical_camera_agv1_frame";
     } else {
       agv_lin = -2.25;
+      agv_num = 2;
       agv_camera_frame = "logical_camera_agv2_frame";
     }
 
@@ -269,6 +289,8 @@ int main(int argc, char **argv) {
       camera_pose = img.pose;
       part_pose = img.models.front().pose;
 
+      // yaw_from_pose(part_pose);
+
       auto tf = get_robot_to_frame(camera_frame);
       tf2::doTransform(blank_pose, offset_pose, tf);
 
@@ -290,9 +312,13 @@ int main(int argc, char **argv) {
       tf2::doTransform(part_pose, goal_pose, tf);
       tf2::doTransform(blank_pose, camera_pose, tf);
 
+      double begin_rotation = yaw_from_pose(part_pose);
+
+      ROS_INFO("Picking up part with rotation: %f", begin_rotation);
+
       // pickup part
-      arm.pickup_part(goal_pose.position, camera_pose.position, left, false,
-                      true);
+      arm.pickup_part(goal_pose.position, camera_pose.position, begin_rotation,
+                      left, false, true);
       ros::Duration(1.0).sleep();
 
       // move to agv
@@ -310,14 +336,29 @@ int main(int argc, char **argv) {
       geometry_msgs::Pose agv_camera_pose, agv_part_pose;
       tf = get_robot_to_frame(agv_camera_frame);
 
-      tf2::doTransform(blank_pose, agv_camera_pose, tf);
-      tf2::doTransform(part.pose, agv_part_pose, tf);
+      std::string tray_frame;
+      {
+        std::stringstream ss;
+        ss << "kit_tray_";
+        ss << agv_num;
+        tray_frame = ss.str();
+      }
+      auto tray_tf = get_robot_to_frame(tray_frame);
 
-      agv_part_pose.position.z = agv_camera_pose.position.z - 0.5;
+      tf2::doTransform(blank_pose, agv_camera_pose, tf);
+      tf2::doTransform(part.pose, agv_part_pose, tray_tf);
+
+      // ROS_INFO("Attempting to place part at ");
+
+      // agv_part_pose.position.z = agv_camera_pose.position.z - 0.5;
+      // agv_part_pose.position.z = -agv_camera_pose.position.z + 0.075;
+      agv_part_pose.position.z += 0.05;
+      // https://bitbucket.org/osrf/ariac/wiki/2019/frame_specifications
+      double end_rotation = yaw_from_pose(agv_part_pose);
 
       // place part on agv
       arm.pickup_part(agv_part_pose.position, agv_camera_pose.position,
-                      agv_id != "agv1", true, false);
+                      end_rotation, agv_id != "agv1", true, false);
 
       ros::Duration(0.5).sleep();
     }

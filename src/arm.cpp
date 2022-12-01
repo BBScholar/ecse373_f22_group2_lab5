@@ -110,7 +110,7 @@ void Arm::joint_state_callback(
     ss << "]";
 
     // ROS_INFO_THROTTLE_STREAM(10.0, "Joint state: " << ss.str());
-    ROS_INFO_STREAM_THROTTLE(1.0, "Current joint state: " << ss.str());
+    ROS_INFO_STREAM_THROTTLE(10.0, "Current joint state: " << ss.str());
   }
 
   // ROS_INFO_STREAM_THROTTLE(10, "Joint state: " << );
@@ -122,8 +122,8 @@ void Arm::joint_state_callback(
   m_current_pose_local.pose = joint_state_to_pose(m_current_joint_state);
   m_current_pose_local.header.stamp = ros::Time::now();
 
-  ROS_INFO_STREAM_THROTTLE(3.0, "Current position (XYZ): " << pose_to_string(
-                                    m_current_pose_local.pose));
+  ROS_INFO_STREAM_THROTTLE(10.0, "Current position (XYZ): " << pose_to_string(
+                                     m_current_pose_local.pose));
 }
 
 bool Arm::go_to_joint_state(ArmJointState joint_state, ros::Duration duration) {
@@ -223,7 +223,10 @@ bool Arm::move_linear_actuator(double position) {
 }
 
 bool Arm::move_arm(ArmJointState joint_state) {
+  // set linear actuator to what it was before
   joint_state[0] = m_current_joint_state[0];
+  // set rotation of end effector to same as it was before
+  joint_state[6] = m_current_joint_state[6];
 
   const auto current_pose = m_current_pose_local.pose;
   const auto goal_pose = joint_state_to_pose(joint_state);
@@ -235,7 +238,7 @@ bool Arm::move_arm(ArmJointState joint_state) {
   double dist = std::sqrt(x * x + y * y + z * z);
 
   if (dist < 0.01) {
-    dist = 0.01;
+    dist = 0.5;
   }
 
   const double duration_per_distance = 1.5;
@@ -249,9 +252,9 @@ bool Arm::move_arm(ArmJointState joint_state) {
 }
 
 bool Arm::pickup_part(geometry_msgs::Point point,
-                      geometry_msgs::Point camera_point, bool left, bool agv,
-                      bool pickup) {
-  point.z += 0.015;
+                      geometry_msgs::Point camera_point, double rotation,
+                      bool left, bool agv, bool pickup) {
+  point.z += 0.02;
 
   geometry_msgs::Point hover, waypoint;
   hover = point;
@@ -279,6 +282,10 @@ bool Arm::pickup_part(geometry_msgs::Point point,
   ros::Duration(0.1).sleep();
   go_to_local_pose(hover);
 
+  rotate_end_effector(rotation);
+
+  ros::Duration(0.1).sleep();
+
   if (pickup) {
     set_vacuum_enable(true);
   }
@@ -297,12 +304,31 @@ bool Arm::pickup_part(geometry_msgs::Point point,
 
   go_to_local_pose(hover);
   ros::Duration(0.1).sleep();
+  rotate_end_effector(0.0);
   go_to_local_pose(waypoint);
   ros::Duration(0.1).sleep();
   go_to_home_pose();
   ros::Duration(0.1).sleep();
 
   return true;
+}
+
+bool Arm::rotate_end_effector(double rotation) {
+  ArmJointState joint_state;
+
+  for (int i = 0; i < 6; ++i) {
+    joint_state[i] = m_current_joint_state[i];
+  }
+
+  while (rotation > 2 * M_PI)
+    rotation -= 2 * M_PI;
+  while (rotation < 0)
+    rotation += 2 * M_PI;
+
+  ROS_INFO("Rotating end effector to angle: %0f radians", rotation);
+
+  joint_state[6] = rotation;
+  return go_to_joint_state(joint_state, ros::Duration(1.5));
 }
 
 bool Arm::move_linear_actuator_relative(double position) {
@@ -362,7 +388,7 @@ bool Arm::go_to_local_pose(geometry_msgs::Point point) {
 
   ROS_INFO_STREAM("Choosing IK solution #" << sol_idx);
 
-  ROS_INFO_STREAM_THROTTLE(3.0, "IK Joint state array: " << ss.str());
+  ROS_INFO_STREAM_THROTTLE(60.0, "IK Joint state array: " << ss.str());
 
   ArmJointState joint_state;
   joint_state[0] = 0.0;

@@ -36,8 +36,10 @@ public:
   bool go_to_home_pose();
 
   bool pickup_part(geometry_msgs::Point point,
-                   geometry_msgs::Point camera_point, bool left = true,
-                   bool agv = false, bool pickup = true);
+                   geometry_msgs::Point camera_point, double rotation = 0.0,
+                   bool left = true, bool agv = false, bool pickup = true);
+
+  bool rotate_end_effector(double rotation);
 
   bool set_vacuum_enable(bool enable);
 
